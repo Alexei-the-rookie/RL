@@ -36,6 +36,67 @@ class Policy(nn.Module):
         # 3. 返回动作和 log_prob (用于梯度计算)
         pass
 
+# a2c.py
+class ActorCritic(nn.Module):
+    """共享特征提取的 Actor-Critic"""
+    def __init__(self, obs_dim, act_dim, hidden_dim=64):
+        super().__init__()
+        self.shared = nn.Sequential(
+            nn.Linear(obs_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU()
+        )
+        self.actor = nn.Linear(hidden_dim, act_dim)    # 策略头
+        self.critic = nn.Linear(hidden_dim, 1)          # 价值头
+    
+    def forward(self, obs):
+        features = self.shared(obs)
+        logits = self.actor(features)
+        value = self.critic(features)
+        return logits, value
+    
+    def get_action_and_value(self, obs):
+        logits, value = self.forward(obs)
+        dist = Categorical(logits=logits)
+        action = dist.sample()
+        log_prob = dist.log_prob(action)
+        return action.item(), log_prob, value.squeeze()
+        # TODO: 返回 action, log_prob, value
+        pass
+
+def train_a2c(env_name='CartPole-v1', total_steps=100000, 
+              lr=3e-3, gamma=0.99):
+    env = gym.make(env_name)
+    obs_dim = env.observation_space.shape[0]
+    act_dim = env.action_space.n
+    
+    model = ActorCritic(obs_dim, act_dim)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    
+    obs, _ = env.reset()
+    for step in range(total_steps):
+        # TODO: 收集 n_steps 数据（或使用单步）
+        # 存储: obs, action, reward, next_obs, done
+        
+        # TODO: 计算 TD 目标
+        # target = r + gamma * V(s') * (1 - done)
+        
+        # TODO: 计算 Critic loss (MSE)
+        # critic_loss = (V(s) - target.detach())^2
+        
+        # TODO: 计算 Actor loss (策略梯度)
+        # advantage = (target - V(s)).detach()
+        # actor_loss = -log_prob * advantage
+        
+        # TODO: 总 loss = actor_loss + 0.5 * critic_loss
+        # 反向传播，更新
+        
+        if done:
+            obs, _ = env.reset()
+        else:
+            obs = next_obs
+
 def compute_returns(rewards, gamma=0.99):
     returns = []
     G_t = 0
