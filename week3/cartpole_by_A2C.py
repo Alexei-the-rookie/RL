@@ -126,6 +126,8 @@ def train_a2c(env_name='CartPole-v1', total_steps=100000,
             avg_reward = np.mean(episode_rewards[-100:])
             n_eps = min(100, len(episode_rewards))
             print(f"Step {step},Avg Reward (last {n_eps} eps): {avg_reward:.1f}")
+    #print(type(log_prob))  # <class 'torch.Tensor'>
+    #print(type(value))     # <class 'torch.Tensor'>
     return episode_rewards
 
 def compute_returns(rewards, gamma=0.99):
