@@ -36,7 +36,6 @@ class Policy(nn.Module):
         # 3. 返回动作和 log_prob (用于梯度计算)
         pass
 
-# a2c.py
 class ActorCritic(nn.Module):
     """共享特征提取的 Actor-Critic"""
     def __init__(self, obs_dim, act_dim, hidden_dim=64):
@@ -66,36 +65,68 @@ class ActorCritic(nn.Module):
         pass
 
 def train_a2c(env_name='CartPole-v1', total_steps=100000, 
-              lr=3e-3, gamma=0.99):
+              lr=1e-3, gamma=0.99):
     env = gym.make(env_name)
     obs_dim = env.observation_space.shape[0]
     act_dim = env.action_space.n
     
     model = ActorCritic(obs_dim, act_dim)
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    
     obs, _ = env.reset()
+    episode_rewards = []
+    episode_reward = 0
     for step in range(total_steps):
+        obs_tensor = torch.tensor(obs, dtype=torch.float32)
+        action, log_prob, value = model.get_action_and_value(obs_tensor)
+        next_obs, reward, done, _, _ = env.step(action)
         # TODO: 收集 n_steps 数据（或使用单步）
         # 存储: obs, action, reward, next_obs, done
-        
+
+        with torch.no_grad():
+            if done:
+                next_value = 0
+            else:
+                next_obs_tensor = torch.tensor(next_obs, dtype=torch.float32)
+                _, next_value = model.forward(next_obs_tensor)
+                next_value = next_value.squeeze().item()
+            #_, _, next_value = model.get_action_and_value(torch.tensor(next_obs, dtype=torch.float32))
+            #next_value =next_value.squeeze()
+
+        target = reward + gamma * next_value * (1 - done)  # TD 目标
+        target = torch.tensor(target, dtype=torch.float32)
         # TODO: 计算 TD 目标
         # target = r + gamma * V(s') * (1 - done)
-        
+
+        critic_loss = (value - target.detach()) ** 2  # MSE 损失
         # TODO: 计算 Critic loss (MSE)
         # critic_loss = (V(s) - target.detach())^2
-        
+
+        advantage = (target - value).detach()
+        actor_loss = -log_prob * advantage  # 策略梯度损失
         # TODO: 计算 Actor loss (策略梯度)
         # advantage = (target - V(s)).detach()
         # actor_loss = -log_prob * advantage
-        
+
+        loss = actor_loss + 0.5 * critic_loss
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
         # TODO: 总 loss = actor_loss + 0.5 * critic_loss
         # 反向传播，更新
-        
+
+        episode_reward += reward
         if done:
+            episode_rewards.append(episode_reward)
+            episode_reward = 0
             obs, _ = env.reset()
         else:
             obs = next_obs
+
+        if step % 100 == 0 and len(episode_rewards) > 0:
+            avg_reward = np.mean(episode_rewards[-100:])
+            n_eps = min(100, len(episode_rewards))
+            print(f"Step {step},Avg Reward (last {n_eps} eps): {avg_reward:.1f}")
+    return episode_rewards
 
 def compute_returns(rewards, gamma=0.99):
     returns = []
@@ -158,11 +189,11 @@ def train_vpg(env_name='CartPole-v1', episodes=1000, lr=1e-3, gamma=0.99):
     return episode_rewards
 
 if __name__ == "__main__":
-    rewards = train_vpg()
+    rewards = train_a2c()
     
     import matplotlib.pyplot as plt
     plt.plot(rewards)
     plt.xlabel('Episode')
     plt.ylabel('Total Reward')
-    plt.title('VPG on CartPole')
-    plt.savefig('vpg_training.png')
+    plt.title('A2C on CartPole')
+    plt.savefig('a2c_training.png')
