@@ -124,14 +124,14 @@ class PPO:
         self,
         obs_dim,
         act_dim,
-        lr=3e-4,
+        lr=5e-5,
         gamma=0.99,
         lam=0.95,           # GAE 参数
         clip_eps=0.2,       # 裁剪阈值 ε
-        K_epochs=10,        # 每次数据复用次数
-        batch_size=64,
-        value_coef=0.5,     # 价值损失系数
-        entropy_coef=0.01,  # 熵正则系数
+        K_epochs=20,        # 每次数据复用次数
+        batch_size=128,     # 小批量大小
+        value_coef=0.75,    # 价值损失系数
+        entropy_coef=0.0005,# 熵正则系数
         max_grad_norm=0.5,  # 梯度裁剪阈值
     ):
         self.gamma = gamma
@@ -178,8 +178,11 @@ class PPO:
         # 3. 递推计算 advantage
         # 4. 最后 advantages[t] = gae
         # 5. returns = advantages + values[:-1] (去掉最后一个 next_value)
-        
-        pass  # 删除这行，填入你的代码
+        for t in T_reverse:
+            delta = rewards[t] + self.gamma * values[t + 1] *(1 - dones[t]) - values[t]
+            gae = delta + self.gamma * self.lam * (1 - dones[t]) * gae
+            advantages[t] = gae
+        # pass  # 删除这行，填入你的代码
         
         returns = advantages + values[:-1]
         return advantages, returns
@@ -199,6 +202,7 @@ class PPO:
         # 计算 GAE 和 returns
         advantages, returns = self.compute_gae(rewards, values, dones)
         
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         # TODO: 填空 9 - 标准化优势
         # advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         
@@ -221,31 +225,35 @@ class PPO:
                 mb_advantages = advantages[mb_indices]
                 mb_returns = returns[mb_indices]
                 
+                _, new_log_probs, entropy, new_values = self.ac.get_action_and_value(mb_obs, mb_actions)
                 # TODO: 填空 10 - 前向传播获取新策略的 log_prob 和价值
                 # _, new_log_probs, entropy, new_values = self.ac.get_action_and_value(...)
-                
+                ratio = torch.exp(new_log_probs - mb_old_log_probs)
                 # TODO: 填空 11 - 计算 ratio = exp(new_log_prob - old_log_prob)
                 # ratio = torch.exp(...)
-                
+                surr1 = ratio * mb_advantages
+                surr2 = torch.clamp(ratio, 1 - self.clip_eps, 1 + self.clip_eps) * mb_advantages
+                actor_loss = -torch.min(surr1, surr2).mean()
                 # TODO: 填空 12 - Clipped Surrogate Objective
                 # surr1 = ratio * mb_advantages
                 # surr2 = torch.clamp(ratio, 1 - self.clip_eps, 1 + self.clip_eps) * mb_advantages
                 # actor_loss = -torch.min(surr1, surr2).mean()
-                
+                critic_loss = F.mse_loss(new_values.squeeze(), mb_returns)
                 # TODO: 填空 13 - Critic Loss (MSE)
                 # critic_loss = F.mse_loss(new_values.squeeze(), mb_returns)
-                
+                loss = actor_loss + self.value_coef * critic_loss - self.entropy_coef * entropy.mean()
                 # TODO: 填空 14 - 总 Loss
                 # loss = actor_loss + self.value_coef * critic_loss - self.entropy_coef * entropy.mean()
                 
                 # 反向传播
                 self.optimizer.zero_grad()
-                # loss.backward()  # 取消注释
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.ac.parameters(), self.max_grad_norm)
                 # TODO: 填空 15 - 梯度裁剪
                 # torch.nn.utils.clip_grad_norm_(self.ac.parameters(), self.max_grad_norm)
                 self.optimizer.step()
                 
-                # update_losses.append(loss.item())  # 取消注释
+                update_losses.append(loss.item())
         
         # 清空缓冲区
         self.buffer.clear()
@@ -293,11 +301,16 @@ def train_ppo(env_name='CartPole-v1', total_steps=200000, rollout_length=2048):
             next_obs, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
             
+            #check if the reward is over a certain threshold.
+            episode_reward += reward
+            if episode_reward >= 1000:
+                done = True
+
             # 存储到 buffer
             agent.buffer.add(obs, action, log_prob, reward, done, value)
             
             obs = next_obs
-            episode_reward += reward
+            #episode_reward += reward
             step += 1
             
             if done:
